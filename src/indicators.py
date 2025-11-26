@@ -1,44 +1,21 @@
+# src/indicators.py
 import pandas as pd
-import ta
 
-def add_indicators(df):
-    """
-    Adds RSI, EMA, and MACD indicators to the dataframe.
-    df must have a 'close' column.
-    """
+def add_sma(df: pd.DataFrame, period: int, column: str = "close") -> pd.DataFrame:
+    df[f"SMA_{period}"] = df[column].rolling(window=period).mean()
+    return df
 
-    #RSI (14)
-    df['RSI'] = ta.momentum.RSIIndicator(
-        close=df['close'],
-        window=14
-    ).rsi()
+def add_rsi(df: pd.DataFrame, period: int = 14, column: str = "close") -> pd.DataFrame:
+    delta = df[column].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
 
-    #EMA indicators (20, 50, 200)
-    df['EMA20'] = ta.trend.EMAIndicator(
-        close=df['close'],
-        window=20
-    ).ema_indicator()
+    rs = gain / loss
+    df["RSI"] = 100 - (100 / (1 + rs))
+    return df
 
-    df['EMA50'] = ta.trend.EMAIndicator(
-        close=df['close'],
-        window=50
-    ).ema_indicator()
-
-    df['EMA200'] = ta.trend.EMAIndicator(
-        close=df['close'],
-        window=200
-    ).ema_indicator()
-
-    # MACD indicators (12, 26, 9)
-    macd = ta.trend.MACD(
-        close=df['close'],
-        window_slow=26,
-        window_fast=12,
-        window_sign=9
-    )
-    
-    df['MACD'] = macd.macd()
-    df['MACD_signal'] = macd.macd_signal()
-    df['MACD_diff'] = macd.macd_diff()
-
+def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    df = add_sma(df, 20)
+    df = add_sma(df, 50)
+    df = add_rsi(df, 14)
     return df
