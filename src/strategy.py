@@ -1,30 +1,34 @@
-def generate_signal(df):
+import pandas as pd
+
+def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Uses the last candle and indicators to decide:
-    BUY / SELL / HOLD
+    Add a 'signal' column:
+    1 = long (buy / hold long)
+    -1 = flat/exit (sell)
+    0 = no position
     """
+    df = df.copy()
 
-    # Get the last candle
-    last = df.iloc[-1]
+    if "SMA_20" not in df or "SMA_50" not in df:
+        raise ValueError("Missing SMA indicators. Call add_indicators first.")
 
-    # BUY CONDITIONS
-    buy_condition = (
-        last['RSI'] < 30 and
-        last['close'] > last['EMA20'] and
-        last['MACD'] > last['MACD_signal']
-    )
+    df["signal"] = 0
 
-    # SELL CONDITIONS
-    sell_condition = (
-        last['RSI'] > 70 or
-        last['MACD'] < last['MACD_signal']
-    )
+    # Simple crossover logic for the mvp
+    df["prev_SMA_20"] = df["SMA_20"].shift(1)
+    df["prev_SMA_50"] = df["SMA_50"].shift(1)
 
-    # Decide the output
-    if buy_condition:
-        return "BUY"
-    
-    if sell_condition:
-        return "SELL"
-    
-    return "HOLD"
+    # Buy signal: 20 crosses above 50
+    buy_condition = (df["prev_SMA_20"] <= df["prev_SMA_50"]) & (df["SMA_20"] > df["SMA_50"])
+
+    # Sell signal: 20 crosses above 50
+    sell_condition = (df["prev_SMA_20"] >= df["prev_SMA_50"]) & (df["SMA_20"] < df["SMA_50"])
+
+    # Optional: Use RSI filter
+    df.loc[df["RSI"] < 50, "signal"] = -1
+
+    # Clean up helper cols
+    df.drop(columns=["prev_SMA_20", "prev_SMA_50"], inplace=True)
+
+    return df
+
