@@ -1,80 +1,113 @@
-import signal
-from tracemalloc import start
-from numpy import sign
+# src/backtester.py
 import pandas as pd
-from indicators import calculate_indicators
-from strategy import generate_signal
 
-class Backtester:
-    def __init__(self, data, starting_balance=1000, leverage=1, fee=0.0004, stop_1oss=0.02, take_profit=0.04):
-        self.data = data.copy()
-        self.balance = starting_balance
-        self.initial_balance = starting_balance
+def run_backtest(
+    df: pd.DataFrame,
+    initial_balance: float = 10_000.0,
+    fee_rate: float = 0.0004,  # 0.04% per trade
+) -> dict:
+    """
+    Backtester based on 'signal' column.
+    Assumes:
+      - signal 1 => go long
+      - signal -1 => exit to cash
+      - no shorting
+    """
+    df = df.copy()
+    if "signal" not in df:
+        raise ValueError("DataFrame must have 'signal' column from strategy.generate_signals")
 
-        self.position = None
-        self.entry_price = None
-        self.leverage = leverage
-        self.fee = fee
-        self.stop_loss = stop_1oss
-        self.take_profit = take_profit
+    balance_usdt = initial_balance
+    position_size = 0.0  # amount of coin
+    equity_curve = []
+    position_state = "CASH"
 
-        self.equity_curve = []
+    trades = []
+    entry_price = None
+    entry_time = None
 
-    def open_position(self, signal, price):
-        self.position = signal
-        self.entry_price = price
+    for timestamp, row in df.iterrows():
+        price = row["close"]
+        sig = row["signal"]
 
-        self.balance -= self.balance * self.fee
+        # ENTER LONG
+        if position_state == "CASH" and sig == 1:
+            entry_price = price
+            entry_time = timestamp
 
-    def close_position(self, price):
-        if self.position == "LONG":
-            pnl = (price - self.entry_price) / self.entry_price
-        elif self.position == "SHORT":
-            pnl = (self.entry_price - price) / self.entry_price
-        
-        pnl *= self.leverage
-        profit = self.balance * pnl
+            position_size = (balance_usdt * (1 - fee_rate)) / price
+            balance_usdt = 0.0
+            position_state = "LONG"
 
-        # Apply exit fees
-        profit -= abs(profit) * self.fee
+        # EXIT LONG
+        elif position_state == "LONG" and sig == -1:
+            exit_price = price
+            exit_time = timestamp
 
-        self.balance += profit
-        self.position = None
-        self.entry_price = None
+            balance_usdt = position_size * price * (1 - fee_rate)
+            position_size = 0.0
+            position_state = "CASH"
 
-    def run(self):
-        self.data = calculate_indicators(self.data)
+            # record trade stats (percentage)
+            trade_return_pct = (exit_price - entry_price) / entry_price * 100
+            trades.append({
+                "entry_time": entry_time,
+                "exit_time": exit_time,
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "return_pct": trade_return_pct,
+            })
 
-        for _, row in self.data.iterrows():
-            price = row["close"]
-            signal = generate_signal(row)
+            entry_price = None
+            entry_time = None
 
-            # If no open trade, open one
-            if self.position is None:
-                if signal in ["LONG", "SHORT"]:
-                    self.open_position(signal, price)
-            
-            else:
-                # Stop loss / Take profit check
-                change = (price - self.entry_price) / self.entry_price
-                change *= self.leverage
+        # Compute equity
+        if position_state == "LONG":
+            equity = position_size * price
+        else:
+            equity = balance_usdt
 
-                if self.position == "SHORT":
-                    change *= -1 # Invert for short
+        equity_curve.append({"time": timestamp, "equity": equity})
 
-                if change <= -self.stop_loss or change >= self.take_profit:
-                    self.close_position(price)
-                    continue
+    eq_df = pd.DataFrame(equity_curve).set_index("time")
+    total_return = (eq_df["equity"].iloc[-1] / initial_balance) - 1
 
-                # Exit signal
-                if signal == "EXIT":
-                    self.close_position(price)
+    trades_df = pd.DataFrame(trades)
 
-            self.equity_curve.append(self.balance)
+    # Basic stats
+    if not trades_df.empty:
+        num_trades = len(trades_df)
+        wins = (trades_df["return_pct"] > 0).sum()
+        losses = (trades_df["return_pct"] <= 0).sum()
+        win_rate = (wins / num_trades) * 100
+        avg_return = trades_df["return_pct"].mean()
+        avg_win = trades_df.loc[trades_df["return_pct"] > 0, "return_pct"].mean()
+        avg_loss = trades_df.loc[trades_df["return_pct"] <= 0, "return_pct"].mean()
+    else:
+        num_trades = wins = losses = 0
+        win_rate = avg_return = avg_win = avg_loss = 0.0
 
-        
-        return {
-            "final_balance": round(self.balance, 2),
-            "return_pct": round(((self.balance - self.initial_balance) / self.initial_balance) * 100, 2),
-            "equity_curve": self.equity_curve
-        }
+    # Max drawdown
+    rolling_max = eq_df["equity"].cummax()
+    drawdown = eq_df["equity"] / rolling_max - 1
+    max_drawdown_pct = drawdown.min() * 100
+
+    stats = {
+        "num_trades": num_trades,
+        "wins": wins,
+        "losses": losses,
+        "win_rate_pct": win_rate,
+        "avg_return_pct": avg_return,
+        "avg_win_pct": avg_win if pd.notna(avg_win) else 0.0,
+        "avg_loss_pct": avg_loss if pd.notna(avg_loss) else 0.0,
+        "max_drawdown_pct": max_drawdown_pct,
+    }
+
+    return {
+        "equity_curve": eq_df,
+        "final_equity": eq_df["equity"].iloc[-1],
+        "total_return_pct": total_return * 100,
+        "initial_balance": initial_balance,
+        "trades": trades_df,
+        "stats": stats,
+    }
