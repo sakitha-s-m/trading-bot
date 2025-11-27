@@ -1,34 +1,83 @@
+from numpy.char import lower
 import pandas as pd
 
-def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
+def sma_crossover_signals(df: pd.DataFrame, fast: int = 10, slow: int = 20) -> pd.DataFrame:
     """
-    Add a 'signal' column:
-    1 = long (buy / hold long)
-    -1 = flat/exit (sell)
-    0 = no position
+    MA crossover strategy:
+        - Buy when fast MA crosses above slow MA
+        - Sell when fast MA crosses below slow MA
     """
+
     df = df.copy()
 
-    if "SMA_20" not in df or "SMA_50" not in df:
-        raise ValueError("Missing SMA indicators. Call add_indicators first.")
+    fast_col = f"SMA_{fast}"
+    slow_col = f"SMA_{slow}"
 
+    if fast_col not in df or slow_col not in df:
+        raise ValueError("Missing SMA indicators. Call add_indicators first.")
+    
     df["signal"] = 0
 
-    # Simple crossover logic for the mvp
-    df["prev_SMA_20"] = df["SMA_20"].shift(1)
-    df["prev_SMA_50"] = df["SMA_50"].shift(1)
+    df["prev_fast"] = df[fast_col].shift(1)
+    df["prev_slow"] = df[slow_col].shift(1)\
 
-    # Buy signal: 20 crosses above 50
-    buy_condition = (df["prev_SMA_20"] <= df["prev_SMA_50"]) & (df["SMA_20"] > df["SMA_50"])
+    buy_condition = (df["prev_fast"] <= df["prev_slow"]) & (df[fast_col] > df[slow_col])
+    sell_condition = (df["prev_fast"] >= df["prev_slow"]) & (df[fast_col] < df[slow_col])
 
-    # Sell signal: 20 crosses above 50
-    sell_condition = (df["prev_SMA_20"] >= df["prev_SMA_50"]) & (df["SMA_20"] < df["SMA_50"])
-
-    # Optional: Use RSI filter
-    df.loc[df["RSI"] < 50, "signal"] = -1
-
-    # Clean up helper cols
-    df.drop(columns=["prev_SMA_20", "prev_SMA_50"], inplace=True)
+    df.loc[buy_condition, "signal"] = 1
+    df.loc[sell_condition, "signal"] = -1
+    
+    df.drop(columns=["prev_fast", "prev_slow"], inplace=True)
 
     return df
 
+def rsi_reversal_signals(
+    df: pd.DataFrame,
+    lower: int = 30,
+    upper: int = 70
+) -> pd.DataFrame:
+    """
+    Simple RSI mean-reversion concept:
+        - Buy when RSI < lower (oversold)
+        - Sell wehn RSI > upper (overbought)
+    """
+
+    df = df.copy()
+
+    if "RSI" not in df:
+        raise ValueError("Missing RSI indicator. Call add_indicators first.")
+    
+    df["signal"] = 0
+
+    buy_condition = df["RSI"] < lower
+    sell_condition = df["RSI"] > upper
+
+    df.loc[buy_condition, "signal"] = 1
+    df.loc[sell_condition, "signal"] = -1
+
+    return df
+
+def generate_signals(
+    df: pd.DataFrame,
+    strategy: str = "sma_crossover",
+    **params
+) -> pd.DataFrame:
+    """
+    Dispatcher: apply the chosen strategy to the dataframe.
+    strategy options:
+        - 'sma_crossover'
+        - 'rsi_reversal'
+    """
+
+    if strategy == "sma_crossover":
+        fast = params.get("fast", 10)
+        slow = params.get("slow", 20)
+        return sma_crossover_signals(df, fast=fast, slow=slow)
+    
+    elif strategy == "rsi_reversal":
+        lower = params.get("lower", 30)
+        upper = params.get("upper", 70)
+        return rsi_reversal_signals(df, lower=lower, upper=upper)
+
+    else:
+        raise ValueError(f"Unknown strategy: {strategy}")
