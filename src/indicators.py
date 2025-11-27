@@ -15,7 +15,8 @@ def add_rsi(df: pd.DataFrame, period: int = 14, column: str = "close") -> pd.Dat
     return df
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    df = add_sma(df, 20)
-    df = add_sma(df, 50)
+
+    df = add_sma(df, 10) # fast MA
+    df = add_sma(df, 20) # slow MA
     df = add_rsi(df, 14)
     return df
