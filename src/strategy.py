@@ -81,3 +81,33 @@ def generate_signals(
 
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
+
+def rsi_trend_signals(
+    df: pd.DataFrame,
+    lower: int = 30,
+    upper: int = 60,
+    trend_ma: int = 20
+) -> pd.DataFrame:
+    """
+    RSI with trend filter:
+        - Defgine uptrend as close > SMA(trend_ma)
+        - Enter long when RSI < lower AND in uptrend
+        - Exit when RSI > upper OR price falls below trend MA
+    """
+    df = df.copy()
+
+    trend_col = f"SMA_{trend_ma}"
+    if "RSI" not in df or trend_col not in df:
+        raise ValueError("Missing RSI or trend SMA. Call add_indicators first.")
+    
+    df["signal"] = 0
+
+    uptrend = df["close"] > df[trend_col]
+
+    buy_condition = (df["RSI"] < lower) & uptrend
+    sell_condition = (df["RSI"] > upper) | (~uptrend)
+
+    df.loc[buy_condition, "signal"] = 1
+    df.loc[sell_condition, "signal"] = -1
+
+    return df
