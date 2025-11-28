@@ -57,31 +57,6 @@ def rsi_reversal_signals(
 
     return df
 
-def generate_signals(
-    df: pd.DataFrame,
-    strategy: str = "sma_crossover",
-    **params
-) -> pd.DataFrame:
-    """
-    Dispatcher: apply the chosen strategy to the dataframe.
-    strategy options:
-        - 'sma_crossover'
-        - 'rsi_reversal'
-    """
-
-    if strategy == "sma_crossover":
-        fast = params.get("fast", 10)
-        slow = params.get("slow", 20)
-        return sma_crossover_signals(df, fast=fast, slow=slow)
-    
-    elif strategy == "rsi_reversal":
-        lower = params.get("lower", 30)
-        upper = params.get("upper", 70)
-        return rsi_reversal_signals(df, lower=lower, upper=upper)
-
-    else:
-        raise ValueError(f"Unknown strategy: {strategy}")
-
 def rsi_trend_signals(
     df: pd.DataFrame,
     lower: int = 30,
@@ -111,3 +86,36 @@ def rsi_trend_signals(
     df.loc[sell_condition, "signal"] = -1
 
     return df
+
+def generate_signals(
+    df: pd.DataFrame,
+    strategy: str = "sma_crossover",
+    **params
+) -> pd.DataFrame:
+    """
+    Dispatcher: apply the chosen strategy to the dataframe.
+    strategy options:
+        - 'sma_crossover'
+        - 'rsi_reversal'
+        - 'rsi_trend'
+    """
+
+    if strategy == "sma_crossover":
+        fast = params.get("fast", 10)
+        slow = params.get("slow", 20)
+        return sma_crossover_signals(df, fast=fast, slow=slow)
+    
+    elif strategy == "rsi_reversal":
+        lower = params.get("lower", 30)
+        upper = params.get("upper", 70)
+        return rsi_reversal_signals(df, lower=lower, upper=upper)
+
+    elif strategy == "rsi_trend":
+        lower = params.get("lower", 30)
+        upper = params.get("upper", 60)
+        trend_ma = params.get("trend_ma", 20)
+        return rsi_trend_signals(df, lower=lower, upper=upper, trend_ma=trend_ma)
+
+    else:
+        raise ValueError(f"Unknown strategy: {strategy}")
+
