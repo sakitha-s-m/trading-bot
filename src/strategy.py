@@ -118,4 +118,3 @@ def generate_signals(
 
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
-
