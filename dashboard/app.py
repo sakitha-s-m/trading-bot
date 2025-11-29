@@ -23,29 +23,29 @@ def main():
 
     strategy_label = st.sidebar.selectbox(
         "Strategy",
-        ["SMA Crossover", "RSI Reversal", "RSI + Trend Filter"]
+        ["RSI Strategy V1 (recommended)", "RSI Reversal", "RSI + Trend Filter", "SMA Crossover"]
     )
 
     strategy_map = {
-        "SMA Crossover": "sma_crossover",
+        "RSI Strategy V1 (recommended)": "rsi_v1",
         "RSI Reversal": "rsi_reversal",
         "RSI + Trend Filter": "rsi_trend",
+        "SMA Crossover": "sma_crossover",
     }
     strategy_name = strategy_map[strategy_label]
 
     # ---- Strategy-specific parameters ----
     params = {}
 
-    if strategy_name == "sma_crossover":
-        fast = st.sidebar.slider("Fast SMA", min_value=5, max_value=50, value=10, step=1)
-        slow = st.sidebar.slider("Slow SMA", min_value=5, max_value=50, value=20, step=1)
-        if fast >= slow:
-            st.sidebar.warning("Fast SMA should be smaller than Slow SMA.")
-        params.update({"fast": fast, "slow": slow})
+    if strategy_name == "rsi_v1":
+        st.sidebar.caption("Use 15m timeframe. No stop-loss. TP around 4% works well.")
+        entry_rsi = st.sidebar.slider("Entry RSI (buy below)", min_value=5, max_value=50, value=25, step=1)
+        exit_rsi = st.sidebar.slider("Exit RSI (sell above)", min_value=50, max_value=95, value=80, step=1)
+        params.update({"entry_rsi": entry_rsi, "exit_rsi": exit_rsi})
 
     elif strategy_name == "rsi_reversal":
-        lower = st.sidebar.slider("RSI lower (buy below)", min_value=5, max_value=50, value=25, step=1)
-        upper = st.sidebar.slider("RSI upper (sell above)", min_value=50, max_value=95, value=80, step=1)
+        lower = st.sidebar.slider("RSI lower (buy below)", min_value=5, max_value=50, value=30, step=1)
+        upper = st.sidebar.slider("RSI upper (sell above)", min_value=50, max_value=95, value=70, step=1)
         params.update({"lower": lower, "upper": upper})
 
     elif strategy_name == "rsi_trend":
@@ -53,6 +53,13 @@ def main():
         upper = st.sidebar.slider("RSI upper (exit above)", min_value=50, max_value=95, value=60, step=1)
         trend_ma = st.sidebar.slider("Trend MA period", min_value=5, max_value=50, value=20, step=1)
         params.update({"lower": lower, "upper": upper, "trend_ma": trend_ma})
+
+    elif strategy_name == "sma_crossover":
+        fast = st.sidebar.slider("Fast SMA", min_value=5, max_value=50, value=10, step=1)
+        slow = st.sidebar.slider("Slow SMA", min_value=5, max_value=50, value=20, step=1)
+        if fast >= slow:
+            st.sidebar.warning("Fast SMA should be smaller than Slow SMA.")
+        params.update({"fast": fast, "slow": slow})
 
     # ---- Risk management: SL / TP ----
     st.sidebar.markdown("---")
