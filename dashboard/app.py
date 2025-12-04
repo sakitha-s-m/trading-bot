@@ -2,7 +2,7 @@
 import os
 import sys
 
-# Add project root to sys.path so 'src' is importable no matter where we run from
+# Add project root to sys.path
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
 if PROJECT_ROOT not in sys.path:
@@ -15,14 +15,71 @@ from src.data import get_historical_klines
 from src.indicators import add_indicators
 from src.strategy import generate_signals
 from src.backtester import run_backtest
-from src.live_trader import live_step_rsi_v1
 from src.wallet import get_equity_snapshot
+from src.runtime_state import load_state, update_config_from_dashboard, set_bot_enabled
 
 st.set_page_config(
     page_title="Trading Bot Dashboard",
     page_icon="📈",
     layout="wide",
 )
+
+
+def compute_live_stats(trades_df: pd.DataFrame, initial_equity: float):
+    """
+    Compute equity curve, PnL, win rate, max drawdown from live trades CSV.
+    Expect columns with at least: 'pnl_usdt' or 'pnl_pct'.
+    """
+    if trades_df.empty:
+        return {
+            "equity_curve": None,
+            "final_equity": initial_equity,
+            "total_pnl_usdt": 0.0,
+            "total_pnl_pct": 0.0,
+            "num_trades": 0,
+            "win_rate_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+        }
+
+    # Prefer pnl_usdt if available; else approximate from pnl_pct
+    if "pnl_usdt" in trades_df.columns:
+        pnl_usdt = trades_df["pnl_usdt"].astype(float)
+    elif "pnl_pct" in trades_df.columns:
+        pnl_usdt = initial_equity * trades_df["pnl_pct"].astype(float) / 100.0
+    else:
+        # Fallback: no PnL info, treat as 0
+        pnl_usdt = pd.Series([0.0] * len(trades_df))
+
+    equity = initial_equity + pnl_usdt.cumsum()
+    equity_curve = pd.DataFrame({"equity": equity})
+
+    final_equity = float(equity.iloc[-1])
+    total_pnl_usdt = final_equity - initial_equity
+    total_pnl_pct = (final_equity / initial_equity - 1.0) * 100.0
+
+    num_trades = len(trades_df)
+    if "pnl_usdt" in trades_df.columns:
+        wins = (trades_df["pnl_usdt"] > 0).sum()
+    elif "pnl_pct" in trades_df.columns:
+        wins = (trades_df["pnl_pct"] > 0).sum()
+    else:
+        wins = 0
+    win_rate_pct = (wins / num_trades * 100.0) if num_trades > 0 else 0.0
+
+    # Max drawdown from equity curve
+    running_max = equity.cummax()
+    drawdown = (equity - running_max) / running_max
+    max_drawdown_pct = drawdown.min() * 100.0  # negative value
+
+    return {
+        "equity_curve": equity_curve,
+        "final_equity": final_equity,
+        "total_pnl_usdt": total_pnl_usdt,
+        "total_pnl_pct": total_pnl_pct,
+        "num_trades": num_trades,
+        "win_rate_pct": win_rate_pct,
+        "max_drawdown_pct": float(max_drawdown_pct),
+    }
 
 
 def main():
@@ -38,7 +95,6 @@ def main():
 
         cfg_col1, cfg_col2, cfg_col3 = st.columns([1.4, 1.4, 1.2])
 
-        # --- Basic settings ---
         with cfg_col1:
             symbol = st.text_input("Symbol", value="BTCUSDT", key="bt_symbol")
             interval = st.selectbox(
@@ -56,7 +112,6 @@ def main():
                 key="bt_limit",
             )
 
-        # --- Strategy selection + params ---
         with cfg_col2:
             strategy_label = st.selectbox(
                 "Strategy",
@@ -166,7 +221,6 @@ def main():
                     st.warning("Fast SMA should be smaller than Slow SMA.")
                 params.update({"fast": fast, "slow": slow})
 
-        # --- Risk management + run button ---
         with cfg_col3:
             st.markdown("**Risk Management (Backtest)**")
             sl_percent = st.slider(
@@ -190,7 +244,6 @@ def main():
 
             run_backtest_btn = st.button("Run Backtest", key="bt_run")
 
-        # --- Run backtest and show results ---
         if run_backtest_btn:
             with st.spinner("Fetching data and running backtest..."):
                 df = get_historical_klines(symbol=symbol, interval=interval, limit=limit)
@@ -243,32 +296,26 @@ def main():
     with tab_live:
         st.subheader("Live Trading — Strategy V1 (Testnet)")
 
-        # --- Initialize session_state for live bot ---
-        if "live_state" not in st.session_state:
-            st.session_state["live_state"] = None
-        if "live_logs" not in st.session_state:
-            st.session_state["live_logs"] = []
-        if "live_trades" not in st.session_state:
-            st.session_state["live_trades"] = []
+        rs = load_state()  # runtime state from JSON
 
+        # === Layout: top config + state ===
         col_cfg, col_state = st.columns([2, 1])
 
-        # --- Live config ---
         with col_cfg:
-            st.markdown("**Configuration**")
+            st.markdown("**Bot Configuration (saved to server)**")
 
-            symbol_live = st.text_input("Symbol", value="ETHUSDT", key="live_symbol")
+            symbol_live = st.text_input("Symbol", value=rs["symbol"], key="live_symbol")
             interval_live = st.selectbox(
                 "Interval",
                 ["15m", "5m", "1m"],
-                index=0,
+                index=["15m", "5m", "1m"].index(rs["interval"]) if rs["interval"] in ["15m", "5m", "1m"] else 0,
                 key="live_interval",
             )
             history_live = st.slider(
                 "History candles",
                 min_value=100,
                 max_value=500,
-                value=200,
+                value=int(rs["history_candles"]),
                 step=50,
                 key="live_history",
             )
@@ -277,7 +324,7 @@ def main():
                 "Entry RSI (buy below)",
                 min_value=5,
                 max_value=50,
-                value=25,
+                value=int(rs["entry_rsi"]),
                 step=1,
                 key="live_entry_rsi",
             )
@@ -285,7 +332,7 @@ def main():
                 "Exit RSI (sell above)",
                 min_value=50,
                 max_value=95,
-                value=80,
+                value=int(rs["exit_rsi"]),
                 step=1,
                 key="live_exit_rsi",
             )
@@ -293,7 +340,7 @@ def main():
                 "Take-profit (%)",
                 min_value=0.0,
                 max_value=10.0,
-                value=4.0,
+                value=float(rs["take_profit_pct"] * 100.0),
                 step=0.5,
                 key="live_tp",
             )
@@ -302,40 +349,41 @@ def main():
                 "Position size (USDT per trade)",
                 min_value=10.0,
                 max_value=10_000.0,
-                value=100.0,
+                value=float(rs["position_size_usdt"]),
                 step=10.0,
                 key="live_size",
             )
 
-        # --- Bot & account state ---
+            initial_eq = st.number_input(
+                "Initial equity (USDT) for stats",
+                min_value=100.0,
+                max_value=1_000_000.0,
+                value=float(rs["initial_equity_usdt"]),
+                step=100.0,
+                key="live_initial_eq",
+            )
+
         with col_state:
-            st.markdown("**Bot & Account State**")
-            live_state = st.session_state["live_state"] or {
-                "in_position": False,
-                "entry_price": None,
-                "position_size": 0.0,
-            }
+            st.markdown("**Account & Bot State**")
 
-            # Get equity snapshot (USDT + BTC + ETH)
+            # current wallet snapshot from testnet
             snapshot = get_equity_snapshot(symbols=("BTCUSDT", "ETHUSDT"))
-
             equity = snapshot["equity_usdt"]
-            pnl_pct = snapshot["pnl_pct"]
+            pnl_pct_vs_initial = (equity / initial_eq - 1.0) * 100.0
 
-            col_s1, col_s2, col_s3 = st.columns(3)
-            col_s1.metric("Equity (USDT)", f"{equity:.2f}")
-            col_s2.metric("PnL vs 10,000 USDT", f"{pnl_pct:.2f}%")
-            col_s3.metric("In position", "Yes" if live_state["in_position"] else "No")
+            col_s1, col_s2 = st.columns(2)
+            col_s1.metric("Initial Equity (USDT)", f"{initial_eq:.2f}")
+            col_s2.metric("Current Equity (USDT)", f"{equity:.2f}")
 
-            st.write(f"Entry price: {live_state['entry_price']}")
-            st.write(f"Position size: {live_state['position_size']}")
+            col_s3, col_s4 = st.columns(2)
+            col_s3.metric("PnL vs Initial (%)", f"{pnl_pct_vs_initial:.2f}%")
+            col_s4.metric("Bot Enabled", "Yes" if rs["bot_enabled"] else "No")
 
-        # --- Control buttons ---
+        # === Bot control buttons ===
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            if st.button("🚀 Run ONE live step now", key="live_step"):
-                new_state, logs, new_trades = live_step_rsi_v1(
-                    st.session_state["live_state"],
+            if st.button("▶️ Start Bot on Server", key="live_start"):
+                update_config_from_dashboard(
                     symbol=symbol_live,
                     interval=interval_live,
                     history_candles=history_live,
@@ -343,31 +391,44 @@ def main():
                     entry_rsi=entry_rsi_live,
                     exit_rsi=exit_rsi_live,
                     take_profit_pct=tp_live / 100.0,
+                    initial_equity_usdt=initial_eq,
+                    bot_enabled=True,
                 )
-                st.session_state["live_state"] = new_state
-                st.session_state["live_logs"].extend(logs)
-                st.session_state["live_trades"].extend(new_trades)
+                st.success("Bot ENABLED. The server daemon will start trading on next cycle.")
 
         with col_btn2:
-            if st.button("🔄 Reset state & logs", key="live_reset"):
-                st.session_state["live_state"] = None
-                st.session_state["live_logs"] = []
-                st.session_state["live_trades"] = []
-                st.success("Live state & logs reset.")
+            if st.button("⏸ Stop Bot on Server", key="live_stop"):
+                set_bot_enabled(False)
+                st.success("Bot DISABLED. The server daemon will stop trading on next cycle.")
 
-        # --- Live log ---
-        st.markdown("### Live Log")
-        log_text = "\n".join(st.session_state["live_logs"][-50:])
-        st.text_area("Log output", value=log_text, height=300)
+        st.markdown("---")
 
-        # --- Live trade history ---
-        st.markdown("### Live Trade History")
-        if st.session_state["live_trades"]:
-            trades_df = pd.DataFrame(st.session_state["live_trades"])
-            trades_df = trades_df.iloc[::-1].reset_index(drop=True)
-            st.dataframe(trades_df)
+        # === Live performance from CSV ===
+        st.markdown("### Live Performance (from trade log)")
+
+        logs_path = os.path.join(PROJECT_ROOT, "logs", "live_trades.csv")
+        if os.path.exists(logs_path):
+            trades_df = pd.read_csv(logs_path)
+            stats = compute_live_stats(trades_df, initial_eq)
+
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            col_m1.metric("Final Equity (USDT)", f"{stats['final_equity']:.2f}")
+            col_m2.metric("Total PnL (USDT)", f"{stats['total_pnl_usdt']:.2f}")
+            col_m3.metric("Total PnL (%)", f"{stats['total_pnl_pct']:.2f}%")
+            col_m4.metric("Win Rate (%)", f"{stats['win_rate_pct']:.2f}%")
+
+            col_m5, col_m6 = st.columns(2)
+            col_m5.metric("Trades", str(stats["num_trades"]))
+            col_m6.metric("Max Drawdown (%)", f"{stats['max_drawdown_pct']:.2f}%")
+
+            if stats["equity_curve"] is not None:
+                st.markdown("#### Equity Curve (based on closed trades)")
+                st.line_chart(stats["equity_curve"]["equity"])
+
+            st.markdown("#### Live Trade History")
+            st.dataframe(trades_df.iloc[::-1].reset_index(drop=True))
         else:
-            st.info("No completed live trades yet.")
+            st.info("No live trade log found yet. Once the bot closes trades, a logs/live_trades.csv file will be created.")
 
 
 if __name__ == "__main__":
