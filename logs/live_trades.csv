@@ -1,0 +1,2 @@
+time,symbol,side,size,entry_price,exit_price,return_pct,exit_reason
+2025-12-04T02:37:01.497704,ETHUSDT,LONG,0.033711577229852276,2966.34,3218.48,8.500037082734949,take_profit
