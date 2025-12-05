@@ -44,8 +44,12 @@ def compute_live_stats(trades_df: pd.DataFrame, initial_equity: float):
     # Prefer pnl_usdt if available; else approximate from pnl_pct
     if "pnl_usdt" in trades_df.columns:
         pnl_usdt = trades_df["pnl_usdt"].astype(float)
+
     elif "pnl_pct" in trades_df.columns:
         pnl_usdt = initial_equity * trades_df["pnl_pct"].astype(float) / 100.0
+    
+    elif "return_pct" in trades_df.columns:
+        pnl_usdt = initial_equity * trades_df["return_pct"].astype(float) / 100.0
     else:
         # Fallback: no PnL info, treat as 0
         pnl_usdt = pd.Series([0.0] * len(trades_df))
@@ -62,6 +66,8 @@ def compute_live_stats(trades_df: pd.DataFrame, initial_equity: float):
         wins = (trades_df["pnl_usdt"] > 0).sum()
     elif "pnl_pct" in trades_df.columns:
         wins = (trades_df["pnl_pct"] > 0).sum()
+    elif "return_pct" in trades_df.columns:
+        wins = (trades_df["return_pct"].astype(float) > 0).sum()
     else:
         wins = 0
     win_rate_pct = (wins / num_trades * 100.0) if num_trades > 0 else 0.0
