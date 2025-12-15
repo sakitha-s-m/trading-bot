@@ -124,7 +124,7 @@ def live_step_rsi_v1(
     symbol: str = "ETHUSDT",
     interval: str = "15m",
     history_candles: int = 200,
-    position_size_usdt: float = 100.0,
+    position_size_usdt: float = 10.0,
     entry_rsi: float = 25.0,
     exit_rsi: float = 80.0,
     take_profit_pct: float = 0.04,
@@ -140,8 +140,8 @@ def live_step_rsi_v1(
     This is designed for Streamlit: you call it on button click,
     and store the 'state' in st.session_state.
     """
-    if TRADING_ENV != "testnet":
-        raise RuntimeError("TRADING_ENV must be 'testnet' for live_step_rsi_v1 (safety).")
+    if TRADING_ENV not in ("testnet", "live"):
+        raise RuntimeError("TRADING_ENV must be 'testnet' or 'live'.")
 
     client = get_binance_client()
 
@@ -259,7 +259,7 @@ def live_loop_rsi_v1(
     symbol: str = "BTCUSDT",
     interval: str = "15m",
     history_candles: int = 200,
-    position_size_usdt: float = 100.0,
+    position_size_usdt: float = 10.0,
     entry_rsi: float = 25.0,
     exit_rsi: float = 80.0,
     take_profit_pct: float = 0.04,
@@ -275,8 +275,8 @@ def live_loop_rsi_v1(
       - Single position per symbol, all-in with 'position_size_usdt' each trade
     """
 
-    if TRADING_ENV != "testnet":
-        raise RuntimeError("TRADING_ENV must be 'testnet' for live_loop_rsi_v1. Refusing to trade live.")
+    if TRADING_ENV not in ("testnet", "live"):
+        raise RuntimeError("TRADING_ENV must be 'testnet' or 'live'.")
     
     client = get_binance_client()
 

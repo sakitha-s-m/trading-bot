@@ -9,10 +9,10 @@ POLL_SECONDS = 60  # how often to trade/check
 
 
 def main():
-    print("=== Smart Trading Bot — Live Daemon (DEMO / TESTNET) ===")
+    print("=== Smart Trading Bot — Live Daemon (LIVE / REAL MONEY) ===")
     print(f"TRADING_ENV: {TRADING_ENV}")
-    if TRADING_ENV != "testnet":
-        raise RuntimeError("For demo running, TRADING_ENV must be 'testnet' in config/.env")
+    if TRADING_ENV not in ("testnet", "live"):
+        raise RuntimeError("TRADING_ENV must be 'testnet' or 'live'.")
 
     state = None  # internal bot position state
 
