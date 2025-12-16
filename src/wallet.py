@@ -30,7 +30,7 @@ def get_latest_price(symbol: str) -> float:
 def get_equity_snapshot(
     symbols: Iterable[str] = ("BTCUSDT", "ETHUSDT"),
     base_asset: str = "USDT",
-    default_start_equity: float = 14.13,
+    default_start_equity: float = 10_000.0,
 ) -> dict:
     """
     Compute a simple equity snapshot:

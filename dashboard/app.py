@@ -257,7 +257,7 @@ def main():
                 df = generate_signals(df, strategy=strategy_name, **params)
                 result = run_backtest(
                     df,
-                    initial_balance=10_000.0,
+                    initial_balance=14.13,
                     fee_rate=0.0004,
                     stop_loss_pct=stop_loss_pct,
                     take_profit_pct=take_profit_pct,

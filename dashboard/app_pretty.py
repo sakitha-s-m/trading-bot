@@ -251,7 +251,7 @@ def main():
     )
 
     # Load live trade log
-    initial_equity = 10_000.0  # adjust if your bot started with a different testnet size
+    initial_equity = 14.13  # adjust if your bot started with a different testnet size
     if os.path.exists(TRADES_CSV_PATH):
         trades_df = pd.read_csv(TRADES_CSV_PATH)
     else:
