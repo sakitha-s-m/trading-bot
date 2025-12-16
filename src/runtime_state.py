@@ -16,7 +16,7 @@ DEFAULT_STATE = {
     "entry_rsi": 25.0,
     "exit_rsi": 80.0,
     "take_profit_pct": 0.04,  # 4%
-    "initial_equity_usdt": 10_000.0,
+    "initial_equity_usdt": 14.13,
 }
 
 def load_state() -> dict:
