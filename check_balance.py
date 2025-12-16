@@ -1,19 +1,30 @@
-from binance.client import Client
-from dotenv import load_dotenv
+# check_balance.py
 import os
+from binance.client import Client
+from src.config import get_binance_client, TRADING_ENV
 
-load_dotenv("config/.env")
+def main():
+    client = get_binance_client()
 
-api_key = os.getenv("BINANCE_API_KEY")
-api_secret = os.getenv("BINANCE_API_SECRET")
+    print("TRADING_ENV:", TRADING_ENV)
 
-client = Client(api_key, api_secret, testnet=True)
+    account = client.get_account()
+    balances = account["balances"]
 
-account = client.get_account()
+    usdt = next(b for b in balances if b["asset"] == "USDT")
+    eth = next(b for b in balances if b["asset"] == "ETH")
 
-print("=== BALANCES ===")
-for bal in account["balances"]:
-    free = float(bal["free"])
-    locked = float(bal["locked"])
-    if free > 0 or locked > 0:
-        print(f"{bal['asset']}: free={bal['free']} locked={bal['locked']}")
+    usdt_free = float(usdt["free"])
+    eth_free = float(eth["free"])
+
+    price = float(client.get_symbol_ticker(symbol="ETHUSDT")["price"])
+
+    equity = usdt_free + eth_free * price
+
+    print(f"USDT balance: {usdt_free:.2f}")
+    print(f"ETH balance: {eth_free:.6f}")
+    print(f"ETH price: {price:.2f}")
+    print(f"Total equity (USDT): {equity:.2f}")
+
+if __name__ == "__main__":
+    main()
