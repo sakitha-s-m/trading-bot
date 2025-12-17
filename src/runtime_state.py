@@ -12,7 +12,7 @@ DEFAULT_STATE = {
     "symbol": "ETHUSDT",
     "interval": "15m",
     "history_candles": 200,
-    "position_size_usdt": 100.0,
+    "position_size_usdt": 10.0,
     "entry_rsi": 25.0,
     "exit_rsi": 80.0,
     "take_profit_pct": 0.04,  # 4%
