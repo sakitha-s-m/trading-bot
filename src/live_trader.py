@@ -18,6 +18,11 @@ LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 TRADES_CSV_PATH = os.path.join(LOGS_DIR, "live_trades.csv")
 
+def get_free_asset_qty(client, asset: str) -> float:
+    bal = client.get_asset_balance(asset=asset)
+    return float(bal["free"]) if bal and bal.get("free") else 0.0
+
+
 def append_trade_to_csv(trade: dict, path: str = TRADES_CSV_PATH):
     """
     Append a single trade dict to CSV file. Creates header if file doesn't exit.
@@ -185,7 +190,12 @@ def live_step_rsi_v1(
         # Take-profit
         if price >= tp_level:
             logs.append(f"[TP] Price {price:.2f} >= TP {tp_level:.2f}, closing position.")
-            order = place_market_order(symbol, "SELL", state["position_size"])
+            
+            base_asset = symbol.replace("USDT", "")
+            free_qty = get_free_asset_qty(client, base_asset)
+
+            order = place_market_order(symbol, "SELL", free_qty)
+
             if order is not None:
                 # compute trade stats
                 ret_pct = (price - entry_price) / entry_price * 100
@@ -212,7 +222,12 @@ def live_step_rsi_v1(
         # Signal-based exit
         elif signal == -1:
             logs.append(f"[EXIT] RSI exit signal triggered at {price:.2f}.")
-            order = place_market_order(symbol, "SELL", state["position_size"])
+            
+            base_asset = symbol.replace("USDT", "")
+            free_qty = get_free_asset_qty(client, base_asset)
+
+            order = place_market_order(symbol, "SELL", free_qty)
+
             if order is not None:
                 ret_pct = (price - entry_price) / entry_price * 100
                 trade = {
