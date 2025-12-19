@@ -18,10 +18,6 @@ LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 TRADES_CSV_PATH = os.path.join(LOGS_DIR, "live_trades.csv")
 
-def get_free_asset_qty(client, asset: str) -> float:
-    bal = client.get_asset_balance(asset=asset)
-    return float(bal["free"]) if bal and bal.get("free") else 0.0
-
 
 def append_trade_to_csv(trade: dict, path: str = TRADES_CSV_PATH):
     """
@@ -48,6 +44,18 @@ def append_trade_to_csv(trade: dict, path: str = TRADES_CSV_PATH):
 
 Side = Literal["BUY", "SELL"]
 
+def _get_available_balance(client, asset: str) -> float:
+    """
+    Get the available (free) balance for a given asset.
+    """
+    try:
+        balance = client.get_asset_balance(asset=asset)
+        if balance:
+            return float(balance.get("free", 0.0))
+    except Exception as e:
+        print(f"[WARN] Could not get balance for {asset}: {e}")
+    return 0.0
+
 def _format_quantity_for_symbol(client, symbol: str, quantity: float) -> float:
     """
     Adjust raw quantity to satisfy Binance LOT_SIZE filter for this symbol.
@@ -71,7 +79,11 @@ def _format_quantity_for_symbol(client, symbol: str, quantity: float) -> float:
     step_size = float(lot_filter["stepSize"])
 
     # clamp to [min_qty, max_qty]
-    qty = max(min_qty, min(quantity, max_qty))
+    qty = min(quantity, max_qty)
+
+    # if below minQty, cannot place order
+    if qty < min_qty:
+        return 0.0
 
     # floor to step size
     if step_size > 0:
@@ -190,65 +202,72 @@ def live_step_rsi_v1(
         # Take-profit
         if price >= tp_level:
             logs.append(f"[TP] Price {price:.2f} >= TP {tp_level:.2f}, closing position.")
-            
-            base_asset = symbol.replace("USDT", "")
-            free_qty = get_free_asset_qty(client, base_asset)
+            # Get actual available balance to ensure we don't try to sell more than we have
+            info = client.get_symbol_info(symbol)
+            base_asset = info["baseAsset"]
 
-            order = place_market_order(symbol, "SELL", free_qty)
-
-            if order is not None:
-                # compute trade stats
-                ret_pct = (price - entry_price) / entry_price * 100
-                trade = {
-                    "time": datetime.utcnow().isoformat(),
-                    "symbol": symbol,
-                    "side": "LONG",
-                    "size": state["position_size"],
-                    "entry_price": entry_price,
-                    "exit_price": price,
-                    "return_pct": ret_pct,
-                    "exit_reason": "take_profit",
-                }
-                completed_trades.append(trade)
-                append_trade_to_csv(trade)
-
-                state["in_position"] = False
-                state["entry_price"] = None
-                state["position_size"] = 0.0
-                logs.append("[TP] SELL order filled.")
+            available_balance = _get_available_balance(client, base_asset)
+            sell_qty = min(state["position_size"], available_balance)
+            if sell_qty <= 0:
+                logs.append(f"[TP] No available balance to sell. Available: {available_balance:.6f}")
             else:
-                logs.append("[TP] SELL order failed, staying in position.")
+                order = place_market_order(symbol, "SELL", sell_qty)
+                if order is not None:
+                    # compute trade stats
+                    ret_pct = (price - entry_price) / entry_price * 100
+                    trade = {
+                        "time": datetime.utcnow().isoformat(),
+                        "symbol": symbol,
+                        "side": "LONG",
+                        "size": sell_qty,
+                        "entry_price": entry_price,
+                        "exit_price": price,
+                        "return_pct": ret_pct,
+                        "exit_reason": "take_profit",
+                    }
+                    completed_trades.append(trade)
+                    append_trade_to_csv(trade)
+
+                    state["in_position"] = False
+                    state["entry_price"] = None
+                    state["position_size"] = 0.0
+                    logs.append(f"[TP] SELL order filled. Sold {sell_qty:.6f}")
+                else:
+                    logs.append("[TP] SELL order failed, staying in position.")
 
         # Signal-based exit
         elif signal == -1:
             logs.append(f"[EXIT] RSI exit signal triggered at {price:.2f}.")
-            
-            base_asset = symbol.replace("USDT", "")
-            free_qty = get_free_asset_qty(client, base_asset)
-
-            order = place_market_order(symbol, "SELL", free_qty)
-
-            if order is not None:
-                ret_pct = (price - entry_price) / entry_price * 100
-                trade = {
-                    "time": datetime.utcnow().isoformat(),
-                    "symbol": symbol,
-                    "side": "LONG",
-                    "size": state["position_size"],
-                    "entry_price": entry_price,
-                    "exit_price": price,
-                    "return_pct": ret_pct,
-                    "exit_reason": "signal",
-                }
-                completed_trades.append(trade)
-                append_trade_to_csv(trade)
-
-                state["in_position"] = False
-                state["entry_price"] = None
-                state["position_size"] = 0.0
-                logs.append("[EXIT] SELL order filled.")
+            # Get actual available balance to ensure we don't try to sell more than we have
+            info = client.get_symbol_info(symbol)
+            base_asset = info["baseAsset"]
+            available_balance = _get_available_balance(client, base_asset)
+            sell_qty = min(state["position_size"], available_balance)
+            if sell_qty <= 0:
+                logs.append(f"[EXIT] No available balance to sell. Available: {available_balance:.6f}")
             else:
-                logs.append("[EXIT] SELL order failed, staying in position.")
+                order = place_market_order(symbol, "SELL", sell_qty)
+                if order is not None:
+                    ret_pct = (price - entry_price) / entry_price * 100
+                    trade = {
+                        "time": datetime.utcnow().isoformat(),
+                        "symbol": symbol,
+                        "side": "LONG",
+                        "size": sell_qty,
+                        "entry_price": entry_price,
+                        "exit_price": price,
+                        "return_pct": ret_pct,
+                        "exit_reason": "signal",
+                    }
+                    completed_trades.append(trade)
+                    append_trade_to_csv(trade)
+
+                    state["in_position"] = False
+                    state["entry_price"] = None
+                    state["position_size"] = 0.0
+                    logs.append(f"[EXIT] SELL order filled. Sold {sell_qty:.6f}")
+                else:
+                    logs.append("[EXIT] SELL order failed, staying in position.")
 
 
     # 3) If NOT in position, check for entry
@@ -260,11 +279,12 @@ def live_step_rsi_v1(
             )
             order = place_market_order(symbol, "BUY", qty)
             if order is not None:
+                # Get actual filled quantity from order response (accounts for fees)
+                executed_qty = float(order.get("executedQty", qty))
                 state["in_position"] = True
                 state["entry_price"] = price
-                # NOTE: we don't know the exact filled qty from here; for now we assume requested qty
-                state["position_size"] = qty
-                logs.append("[ENTRY] BUY order filled.")
+                state["position_size"] = executed_qty
+                logs.append(f"[ENTRY] BUY order filled. Executed qty: {executed_qty:.6f} (requested: {qty:.6f})")
             else:
                 logs.append("[ENTRY FAILED] Staying flat (no position opened).")
 
@@ -333,18 +353,36 @@ def live_loop_rsi_v1(
                 # Take-profit check
                 if price >= tp_level:
                     print(f"[TP] Price {price:.2f} >= TP level {tp_level:.2f}, closing position.")
-                    place_market_order(symbol, "SELL", state["position_size"])
-                    state["in_position"] = False
-                    state["entry_price"] = None
-                    state["position_size"] = 0.0
+                    # Get actual available balance to ensure we don't try to sell more than we have
+                    info = client.get_symbol_info(symbol)
+                    base_asset = info["baseAsset"]
+
+                    available_balance = _get_available_balance(client, base_asset)
+                    sell_qty = min(state["position_size"], available_balance)
+                    if sell_qty > 0:
+                        place_market_order(symbol, "SELL", sell_qty)
+                        state["in_position"] = False
+                        state["entry_price"] = None
+                        state["position_size"] = 0.0
+                    else:
+                        print(f"[TP] No available balance to sell. Available: {available_balance:.6f}")
                 
                 # Signal-based exit
                 elif signal == -1:
                     print(f"[EXIT] RSI exit signal triggered at price {price:.2f}.")
-                    place_market_order(symbol, "SELL", state["position_size"])
-                    state["in_position"] = False
-                    state["entry_price"] = None
-                    state["position_size"] = 0.0
+                    # Get actual available balance to ensure we don't try to sell more than we have
+                    info = client.get_symbol_info(symbol)
+                    base_asset = info["baseAsset"]
+
+                    available_balance = _get_available_balance(client, base_asset)
+                    sell_qty = min(state["position_size"], available_balance)
+                    if sell_qty > 0:
+                        place_market_order(symbol, "SELL", sell_qty)
+                        state["in_position"] = False
+                        state["entry_price"] = None
+                        state["position_size"] = 0.0
+                    else:
+                        print(f"[EXIT] No available balance to sell. Available: {available_balance:.6f}")
             
             # 3) If NOT in position, check for entry
             else:
@@ -355,10 +393,13 @@ def live_loop_rsi_v1(
                     order = place_market_order(symbol, "BUY", qty)
 
                     if order is not None:
+                        # Get actual filled quantity from order response (accounts for fees)
+                        executed_qty = float(order.get("executedQty", qty))
                         # Only mark in-position if order succeeded
                         state["in_position"] = True
                         state["entry_price"] = price
-                        state["position_size"] = qty
+                        state["position_size"] = executed_qty
+                        print(f"[ENTRY] BUY order filled. Executed qty: {executed_qty:.6f} (requested: {qty:.6f})")
                     else:
                         print("[ENTRY FAILED] Staying flat (no position opened.)")
                         state["in_position"] = False
