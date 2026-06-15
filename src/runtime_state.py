@@ -15,7 +15,8 @@ DEFAULT_STATE = {
     "position_size_usdt": 8.0,
     "entry_rsi": 25.0,
     "exit_rsi": 80.0,
-    "take_profit_pct": 0.04,  # 4%
+    "take_profit_pct": 0.04,
+    "atr_stop_multiplier": 2.0,
     "initial_equity_usdt": 10_000.0,
 }
 
@@ -53,6 +54,7 @@ def update_config_from_dashboard(
     entry_rsi: float,
     exit_rsi: float,
     take_profit_pct: float,
+    atr_stop_multiplier: float,
     initial_equity_usdt: float,
     bot_enabled: bool | None = None,
 ):
@@ -64,6 +66,7 @@ def update_config_from_dashboard(
     state["entry_rsi"] = float(entry_rsi)
     state["exit_rsi"] = float(exit_rsi)
     state["take_profit_pct"] = float(take_profit_pct)
+    state["atr_stop_multiplier"] = float(atr_stop_multiplier)
     state["initial_equity_usdt"] = float(initial_equity_usdt)
     if bot_enabled is not None:
         state["bot_enabled"] = bool(bot_enabled)

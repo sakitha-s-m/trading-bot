@@ -1,13 +1,13 @@
 from http import client
-import time
-from typing import Literal
 import math
 import os
 import csv
+import time
 from datetime import datetime
+from typing import Literal
 
+import pandas as pd
 from binance.exceptions import BinanceAPIException
-from numpy import sign
 
 from .config import get_binance_client, TRADING_ENV, ensure_live_trading_allowed
 from .data import get_historical_klines
@@ -145,6 +145,7 @@ def live_step_rsi_v1(
     entry_rsi: float = 25.0,
     exit_rsi: float = 80.0,
     take_profit_pct: float = 0.04,
+    atr_stop_multiplier: float = 2.0,
 ) -> tuple[dict, list[str], list[dict]]:
     """
     Run ONE live trading step of RSI Strategy V1.
@@ -168,6 +169,7 @@ def live_step_rsi_v1(
             "in_position": False,
             "entry_price": None,
             "position_size": 0.0,
+            "stop_price": None,
         }
     
     logs: list[str] = []
@@ -193,14 +195,47 @@ def live_step_rsi_v1(
         f"[{symbol}] Price: {price:.2f} | RSI: {rsi:.2f} | signal: {signal} | in_position: {state['in_position']}"
     )
 
-    # 2) If in position, check TP or exit
+    # 2) If in position, check ATR stop, TP, or RSI exit
     if state["in_position"]:
         entry_price = state["entry_price"]
-        tp_level = entry_price * (1 + take_profit_pct)
+        tp_level    = entry_price * (1 + take_profit_pct)
+        stop_price  = state.get("stop_price")
+
+        # ATR stop-loss (checked first — highest priority)
+        if stop_price is not None and price <= stop_price:
+            logs.append(f"[STOP] Price {price:.2f} <= ATR stop {stop_price:.2f}, closing position.")
+            info = client.get_symbol_info(symbol)
+            base_asset = info["baseAsset"]
+            available_balance = _get_available_balance(client, base_asset)
+            sell_qty = min(state["position_size"], available_balance)
+            if sell_qty <= 0:
+                logs.append(f"[STOP] No available balance. Available: {available_balance:.6f}")
+            else:
+                order = place_market_order(symbol, "SELL", sell_qty)
+                if order is not None:
+                    ret_pct = (price - entry_price) / entry_price * 100
+                    trade = {
+                        "time": datetime.utcnow().isoformat(),
+                        "symbol": symbol,
+                        "side": "LONG",
+                        "size": sell_qty,
+                        "entry_price": entry_price,
+                        "exit_price": price,
+                        "return_pct": ret_pct,
+                        "exit_reason": "stop_loss",
+                    }
+                    completed_trades.append(trade)
+                    append_trade_to_csv(trade)
+                    state["in_position"] = False
+                    state["entry_price"] = None
+                    state["position_size"] = 0.0
+                    state["stop_price"] = None
+                    logs.append(f"[STOP] SELL filled. Loss: {ret_pct:.2f}%")
+                else:
+                    logs.append("[STOP] SELL order failed, staying in position.")
 
         # Take-profit
-        # Take-profit
-        if price >= tp_level:
+        elif price >= tp_level:
             logs.append(f"[TP] Price {price:.2f} >= TP {tp_level:.2f}, closing position.")
             # Get actual available balance to ensure we don't try to sell more than we have
             info = client.get_symbol_info(symbol)
@@ -231,6 +266,7 @@ def live_step_rsi_v1(
                     state["in_position"] = False
                     state["entry_price"] = None
                     state["position_size"] = 0.0
+                    state["stop_price"] = None
                     logs.append(f"[TP] SELL order filled. Sold {sell_qty:.6f}")
                 else:
                     logs.append("[TP] SELL order failed, staying in position.")
@@ -265,6 +301,7 @@ def live_step_rsi_v1(
                     state["in_position"] = False
                     state["entry_price"] = None
                     state["position_size"] = 0.0
+                    state["stop_price"] = None
                     logs.append(f"[EXIT] SELL order filled. Sold {sell_qty:.6f}")
                 else:
                     logs.append("[EXIT] SELL order failed, staying in position.")
@@ -279,11 +316,19 @@ def live_step_rsi_v1(
             )
             order = place_market_order(symbol, "BUY", qty)
             if order is not None:
-                # Get actual filled quantity from order response (accounts for fees)
                 executed_qty = float(order.get("executedQty", qty))
                 state["in_position"] = True
                 state["entry_price"] = price
                 state["position_size"] = executed_qty
+
+                # Set ATR stop-loss
+                atr_val = latest["ATR_14"] if "ATR_14" in latest.index else None
+                if atr_stop_multiplier and atr_val and not pd.isna(atr_val):
+                    state["stop_price"] = price - (atr_stop_multiplier * atr_val)
+                    logs.append(f"[ENTRY] ATR stop set at {state['stop_price']:.2f}")
+                else:
+                    state["stop_price"] = None
+
                 logs.append(f"[ENTRY] BUY order filled. Executed qty: {executed_qty:.6f} (requested: {qty:.6f})")
             else:
                 logs.append("[ENTRY FAILED] Staying flat (no position opened).")

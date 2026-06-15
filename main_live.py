@@ -33,6 +33,7 @@ def main():
                     entry_rsi=rs["entry_rsi"],
                     exit_rsi=rs["exit_rsi"],
                     take_profit_pct=rs["take_profit_pct"],
+                    atr_stop_multiplier=rs["atr_stop_multiplier"],
                 )
 
                 for line in logs:

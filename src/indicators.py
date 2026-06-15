@@ -14,12 +14,18 @@ def add_rsi(df: pd.DataFrame, period: int = 14, column: str = "close") -> pd.Dat
     df["RSI"] = 100 - (100 / (1 + rs))
     return df
 
+def add_atr(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+    hl  = df["high"] - df["low"]
+    hpc = (df["high"] - df["close"].shift(1)).abs()
+    lpc = (df["low"]  - df["close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    df[f"ATR_{period}"] = tr.rolling(window=period).mean()
+    return df
+
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Add a set of SMAs + RSI to support the strategies.
-    """
+    """Add SMAs, RSI, and ATR to support all strategies."""
     for p in [5, 10, 20, 50]:
         df = add_sma(df, p)
-
     df = add_rsi(df, 14)
+    df = add_atr(df, 14)
     return df
